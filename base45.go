@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 // most of the code copied from encoding/base64 package.
 
-// Package base45 implements base64 encoding as specified by draft-faltstrom-base45-06.
+// Package base45 implements base45 encoding as specified by draft-faltstrom-base45-06.
 package base45
 
 import (
@@ -76,7 +76,7 @@ func EncodedLen(n int) int {
 	return res
 }
 
-// EncodeToString returns the base64 encoding of src.
+// EncodeToString returns the base45 encoding of src.
 func EncodeToString(src []byte) string {
 	buf := make([]byte, EncodedLen(len(src)))
 	Encode(buf, src)

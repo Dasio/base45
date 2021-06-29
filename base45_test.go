@@ -6,7 +6,9 @@ package base45
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -15,7 +17,7 @@ type testpair struct {
 	decoded, encoded string
 }
 
-var pairs =[]testpair{
+var pairs = []testpair{
 	{
 		decoded: "AB",
 		encoded: "BB8",
@@ -36,7 +38,6 @@ var pairs =[]testpair{
 		decoded: "base-45-",
 		encoded: "UJCLQE7W5NW6",
 	},
-
 }
 
 var bigTest = testpair{
@@ -52,7 +53,6 @@ func testEqual(t *testing.T, msg string, args ...interface{}) bool {
 	}
 	return true
 }
-
 
 func TestEncode(t *testing.T) {
 	for _, p := range pairs {
@@ -89,7 +89,7 @@ func TestDecode(t *testing.T) {
 func TestDecoder(t *testing.T) {
 	for _, p := range pairs {
 		// We can't read everything in one read
-		if len(p.encoded) % 3 != 0 {
+		if len(p.encoded)%3 != 0 {
 			continue
 		}
 		decoder := NewDecoder(strings.NewReader(p.encoded))
@@ -122,5 +122,105 @@ func TestDecoderBuffering(t *testing.T) {
 			t.Errorf("Read from %q at pos %d = %d, unexpected error %v", bigTest.encoded, total, n, err)
 		}
 		testEqual(t, "Decoding/%d of %q = %q, want %q", bs, bigTest.encoded, string(buf[0:total]), bigTest.decoded)
+	}
+}
+
+func TestDecodeCorrupt(t *testing.T) {
+	testCases := []struct {
+		input  string
+		offset int // -1 means no corruption.
+	}{
+		{"", -1},
+		{"FGW", -1},
+		{"GGW", 3},
+		{"FaW", 1},
+	}
+	for _, tc := range testCases {
+		dbuf := make([]byte, DecodedLen(len(tc.input)))
+		_, err := Decode(dbuf, []byte(tc.input))
+		if tc.offset == -1 {
+			if err != nil {
+				t.Error("Decoder wrongly detected corruption in", tc.input)
+			}
+			continue
+		}
+		switch err := err.(type) {
+		case CorruptInputError:
+			testEqual(t, "Corruption in %q at offset %v, want %v", tc.input, int(err), tc.offset)
+		default:
+			t.Error("Decoder failed to detect corruption in", tc)
+		}
+	}
+}
+
+func TestDecodeBounds(t *testing.T) {
+	var buf [32]byte
+	s := EncodeToString(buf[:])
+	defer func() {
+		if err := recover(); err != nil {
+			t.Fatalf("Decode panicked unexpectedly: %v\n%s", err, debug.Stack())
+		}
+	}()
+	n, err := Decode(buf[:], []byte(s))
+	if n != len(buf) || err != nil {
+		t.Fatalf("StdEncoding.Decode = %d, %v, want %d, nil", n, err, len(buf))
+	}
+}
+
+func TestBig(t *testing.T) {
+	n := 3*1000 + 1
+	raw := make([]byte, n)
+	const alpha = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	for i := 0; i < n; i++ {
+		raw[i] = alpha[i%len(alpha)]
+	}
+	encoded := new(bytes.Buffer)
+	w := NewEncoder(encoded)
+	nn, err := w.Write(raw)
+	if nn != n || err != nil {
+		t.Fatalf("Encoder.Write(raw) = %d, %v want %d, nil", nn, err, n)
+	}
+	err = w.Close()
+	if err != nil {
+		t.Fatalf("Encoder.Close() = %v want nil", err)
+	}
+	decoded, err := io.ReadAll(NewDecoder(encoded))
+	if err != nil {
+		t.Fatalf("io.ReadAll(NewDecoder(...)): %v", err)
+	}
+
+	if !bytes.Equal(raw, decoded) {
+		var i int
+		for i = 0; i < len(decoded) && i < len(raw); i++ {
+			if decoded[i] != raw[i] {
+				break
+			}
+		}
+		t.Errorf("Decode(Encode(%d-byte string)) failed at offset %d", n, i)
+	}
+}
+
+func BenchmarkEncodeToString(b *testing.B) {
+	data := make([]byte, 8192)
+	b.SetBytes(int64(len(data)))
+	for i := 0; i < b.N; i++ {
+		EncodeToString(data)
+	}
+}
+
+func BenchmarkDecodeString(b *testing.B) {
+	sizes := []int{2, 4, 8, 64, 8192}
+	benchFunc := func(b *testing.B, benchSize int) {
+		data := EncodeToString(make([]byte, benchSize))
+		b.SetBytes(int64(len(data)))
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, _ = DecodeString(data)
+		}
+	}
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
+			benchFunc(b, size)
+		})
 	}
 }

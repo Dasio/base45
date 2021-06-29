@@ -19,7 +19,7 @@ const (
 )
 
 var decodeMap = [256]byte{
-	0xFF, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+	255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
 	255, 255, 255, 255, 255, 255, 255, 255, 255, 36, 255, 255, 255, 37, 38, 255, 255, 255, 255, 39, 40, 255, 41, 42, 43,
 	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 44, 255, 255, 255, 255, 255, 255, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
 	23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
@@ -55,12 +55,11 @@ func Encode(dst, src []byte) {
 		di += encodedChunkSize
 	}
 
-	remain := len(src) - si
-	if remain == 0 {
+	if len(src)-si == 0 {
 		return
 	}
 
-	val := uint(src[si+0])
+	val := uint(src[si])
 
 	dst[di+0] = encode[val%baseSize]
 	dst[di+1] = encode[(val/baseSize)%baseSize]
@@ -195,29 +194,16 @@ func decodeTriplet(dst, src []byte, si int) (nsi, n int, err error) {
 		si++
 
 		out := decodeMap[in]
-		if out != 0xff {
-			dbuf[j] = out
-			continue
+		if out == 0xFF {
+			return si, 0, CorruptInputError(si - j)
 		}
-
-		if in == '\n' || in == '\r' {
-			j--
-			continue
-		}
-
-		// skip over newlines
-		for si < len(src) && (src[si] == '\n' || src[si] == '\r') {
-			si++
-		}
-		if si < len(src) {
-			// trailing garbage
-			err = CorruptInputError(si)
-		}
-		dlen = j
-		break
+		dbuf[j] = out
 	}
 
 	val := int(dbuf[0]) + baseSize*int(dbuf[1]) + baseSize*baseSize*int(dbuf[2])
+	if val > 0xFFFF {
+		err = CorruptInputError(si)
+	}
 	switch dlen {
 	case 3:
 		dst[0] = byte(val / 256)
@@ -274,7 +260,7 @@ type decoder struct {
 
 // NewDecoder constructs a new base45 stream decoder.
 func NewDecoder(r io.Reader) io.Reader {
-	return &decoder{r: &newlineFilteringReader{r}}
+	return &decoder{r: r}
 }
 
 func (d *decoder) Read(p []byte) (n int, err error) {
@@ -329,7 +315,7 @@ func (d *decoder) Read(p []byte) (n int, err error) {
 	// Decode chunk into p, or d.out and then p if p is too small.
 	nr := d.nbuf
 	nw := DecodedLen(d.nbuf)
-	if nr % encodedChunkSize == 1 {
+	if nr%encodedChunkSize == 1 {
 		nr--
 	}
 	if nw > len(p) {
@@ -343,29 +329,4 @@ func (d *decoder) Read(p []byte) (n int, err error) {
 	d.nbuf -= nr
 	copy(d.buf[:d.nbuf], d.buf[nr:])
 	return n, d.err
-}
-
-type newlineFilteringReader struct {
-	wrapped io.Reader
-}
-
-func (r *newlineFilteringReader) Read(p []byte) (int, error) {
-	n, err := r.wrapped.Read(p)
-	for n > 0 {
-		offset := 0
-		for i, b := range p[:n] {
-			if b != '\r' && b != '\n' {
-				if i != offset {
-					p[offset] = b
-				}
-				offset++
-			}
-		}
-		if offset > 0 {
-			return offset, err
-		}
-		// Previous buffer entirely whitespace, read again
-		n, err = r.wrapped.Read(p)
-	}
-	return n, err
 }

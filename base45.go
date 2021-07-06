@@ -275,13 +275,14 @@ func (d *decoder) Read(p []byte) (n int, err error) {
 		return 0, d.err
 	}
 
-	// This code assumes that d.r strips supported whitespace ('\r' and '\n').
 	// Refill buffer.
 	for d.nbuf < encodedChunkSize && d.readErr == nil {
 		nn := len(p) / chunkSize * encodedChunkSize
 		if nn < encodedChunkSize {
 			nn = encodedChunkSize
 		}
+		// Try to read one more segment.
+		nn += encodedChunkSize
 		if nn > len(d.buf) {
 			nn = len(d.buf)
 		}

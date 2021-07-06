@@ -38,6 +38,10 @@ var pairs = []testpair{
 		decoded: "base-45-",
 		encoded: "UJCLQE7W5NW6",
 	},
+	{
+		decoded: string([]byte{0xFF}),
+		encoded: "U5",
+	},
 }
 
 var bigTest = testpair{
@@ -66,8 +70,8 @@ func TestEncoder(t *testing.T) {
 	for _, p := range pairs {
 		bb := &bytes.Buffer{}
 		encoder := NewEncoder(bb)
-		encoder.Write([]byte(p.decoded))
-		encoder.Close()
+		_, _ = encoder.Write([]byte(p.decoded))
+		_ = encoder.Close()
 		testEqual(t, "Encode(%q) = %q, want %q", p.decoded, bb.String(), p.encoded)
 	}
 }
@@ -88,10 +92,6 @@ func TestDecode(t *testing.T) {
 
 func TestDecoder(t *testing.T) {
 	for _, p := range pairs {
-		// We can't read everything in one read
-		if len(p.encoded)%3 != 0 {
-			continue
-		}
 		decoder := NewDecoder(strings.NewReader(p.encoded))
 		dbuf := make([]byte, DecodedLen(len(p.encoded)))
 		count, err := decoder.Read(dbuf)
